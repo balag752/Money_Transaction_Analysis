@@ -1,0 +1,173 @@
+---
+title: "CashFlow"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+#install.packages("ggplot2")
+library("ggplot2", lib.loc="~/R/win-library/3.4")
+
+#install.packages("sqldf")
+library("sqldf", lib.loc="~/R/win-library/3.4")
+
+require(lubridate)
+
+#library("mice", lib.loc="~/R/win-library/3.3")
+library("zoo", lib.loc="~/R/win-library/3.4")
+require(forecast)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+setwd("F:/Techi/Data Science/ML/Project_1_Cash_Flow")
+
+Source_File<-read.csv("F:/Techi/Data Science/ML/Project_1_Cash_Flow/MyTrans.csv")
+Day_table=read.csv("F:/Techi/Data Science/ML/Project_1_Cash_Flow/Day_Table.csv")
+
+```
+
+
+```{r Cleanse Part}
+
+cleanse_data=Source_File
+cleanse_data$Transaction_Date=cleanse_data$Transaction.Date
+cleanse_data$Withdrawal=cleanse_data$Withdrawal.Amount..INR..
+cleanse_data$Deposit=cleanse_data$Deposit.Amount..INR..
+cleanse_data$Balance=cleanse_data$Balance..INR..
+cleanse_data$Fiscal_Transaction_Date=dmy(cleanse_data$Transaction_Date)+1
+#cleanse_data$Fiscal_Transaction_month=paste(year(cleanse_data$Fiscal_Transaction_Date),'-',month(cleanse_data$Fiscal_Transaction_Date),sep='')
+#cleanse_data$Fiscal_Transaction_DY=paste(year(cleanse_data$Fiscal_Transaction_Date),'-',day(cleanse_data$Fiscal_Transaction_Date),sep='')
+
+#head(cleanse_data)
+
+#sqldf("select Fiscal_Transaction_month Month, SUM(Withdrawal) Withdrawal,sum(Deposit) Deposit from cleanse_data group by 1")
+
+#sqldf("select Fiscal_Transaction_month,Fiscal_Transaction_DY days, MAX(balance) Deposit from cleanse_data where Fiscal_Transaction_DY like '201_-1' group by 1,2")
+
+colnames(Day_table)[1]=c("Fiscal_Transaction_Date")
+
+cleanse_data$Fiscal_Transaction_Day=wday(cleanse_data$Fiscal_Transaction_Date)
+cleanse_data$Fiscal_Transaction_Date=as.character(cleanse_data$Fiscal_Transaction_Date)
+head(as.character(cleanse_data$Fiscal_Transaction_Date))
+head(Day_table$Fiscal_Transaction_Date)
+
+Data_1=merge(x=cleanse_data,y=Day_table, by="Fiscal_Transaction_Date", all.y=TRUE)
+Data_1$id=1:length(Data_1$Month)
+Data_1=subset(Data_1,Data_1$id>250 & Data_1$id<740)
+
+Cluster_data=Data_1[c("Date_in_month","Month","Fiscal_Transaction_Day","Balance","Fiscal_Transaction_Date")]
+
+Timeseries_data=sqldf("select Fiscal_Transaction_Date, avg(Balance) Balance from Data_1 group by 1")
+
+```
+
+```{r - Imputing missing values}
+
+
+Timeseries_data <- zoo(Timeseries_data[,2], as.Date(Timeseries_data[,1], format = "%Y-%m-%d"))
+
+x0 <- x <- log(Timeseries_data)
+y <- x
+
+head(x,5)
+# fit model
+fit <- auto.arima(x)
+
+# Kalman filter
+kr <- KalmanRun(x, fit$model)
+# impute missing values Z %*% alpha at each missing observation
+id.na <- which(is.na(x))
+for (i in id.na)
+  y[i] <- fit$model$Z %*% kr$states[i,]
+# alternative to the explicit loop above
+sapply(id.na, FUN = function(x, Z, alpha) Z %*% alpha[x,], 
+  Z = fit$model$Z, alpha = kr$states)
+
+
+##########################
+#kr <- KalmanSmooth(x, fit$model)
+#for (i in id.na)
+#  y[i] <- kr$smooth[i,]
+###########################
+
+
+plot(x0, col = "gray")
+lines(x)
+points(time(y)[id.na], y[id.na], col = "red", pch = 17)
+
+head(y,10)
+head(x,10)
+new_Balance=as.data.frame(x)
+
+length(new_Balance$x)
+
+
+```
+
+
+```{r - Cluster analysis}
+#str(normalized_data)
+
+#cor(Cluster_data)
+
+fit <- hclust(dist(Cluster_data, method = "euclidean"), method="complete")
+plot(fit)
+groups <- cutree(fit, k=4)
+rect.hclust(fit, k=4, border="red")
+
+Data_1$membership<-as.factor(groups)
+Data_1$membershiparea <- ifelse(Data_1$membership == 4,"4- Rich",
+        ifelse(Data_1$membership  ==1, "3- Top",
+        ifelse(Data_1$membership == 2,"2- Medium",
+               ifelse(Data_1$membership == 3,"1- Low","UNK"))))
+
+Data_1$membership_o <- ifelse(Data_1$membership == 4,4,
+        ifelse(Data_1$membership  ==1, 3,
+        ifelse(Data_1$membership == 2,2,
+               ifelse(Data_1$membership == 3,1,0))))
+
+
+sqldf("select membership_o, membership,avg(Balance),round(avg(Week)) Week, round(avg(Month)) Month, round(avg(Month)) Month, round(avg(year)) Year, round(avg(Week_in_month)) Week_In_Month       from Data_1 group by 1,2")
+
+
+```
+
+```{r = Year analysis}
+
+
+
+ggplot(Data_1, aes(Date_in_month, as.factor(Month), color =membership_o)) + geom_point(alpha = .6, size = 3) +
+scale_colour_gradient(low = "Red", high = "Green",  space = "Lab", guide = "colourbar")  
+
+
+ggplot(Data_1, aes(as.integer(Data_1$Date_in_month),as.factor(Data_1$Month)))+
+  geom_raster(aes(fill = membership_o)) +
+scale_fill_gradientn(colours = c('red', 'orange','yellow','green'))
+
+  
+
+```
+
+```{r = Week analysis}
+
+ggplot(Data_1, aes(Week_in_month, as.factor(Month), color =membership_o)) + geom_point(alpha = .6, size = 3) +
+scale_colour_gradient(low = "Red", high = "Green",  space = "Lab", guide = "colourbar")  
+
+
+#ggplot(Data_1, aes(Week_in_month, factor(Month), color = factor(Data_1$membership_o))) + geom_point(alpha = 0.6, size = 3) +  geom_point(col = Data_1$membership_o) +scale_color_manual(values = c('red', 'orange','yellow','green')) 
+
+
+
+ggplot(Data_1, aes(as.integer(Week_in_month),as.factor(Data_1$Month)))+
+  geom_raster(aes(fill = membership_o)) +
+scale_fill_gradientn(colours = c('red', 'orange','yellow','green'))
+
+
+  
+```
