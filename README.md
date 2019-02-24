@@ -9,8 +9,6 @@ Created clusters to identify and differtiate the transactions
 
 ## Required Libraries
 
-Use the package manager [pip](https://pip.pypa.io/en/stable/) to install plyer.
-
 ``` 
 install.packages("ggplot2")
 install.packages("sqldf")
